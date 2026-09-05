@@ -33,7 +33,7 @@ For activity, the intended path is immutable CSVs, bounded streaming partial agg
 
 ### Implemented core staging schema
 
-Migration 002 creates three currently empty typed staging tables. Data loading is a later milestone.
+Migration 002 creates three typed staging tables. The member/churn loading milestone populates `staging.members` and `staging.churn_labels`; `staging.transactions` remains empty pending its separate load milestone.
 
 | Implemented table | Physical grain and treatment |
 | --- | --- |
