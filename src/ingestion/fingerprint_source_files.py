@@ -241,7 +241,8 @@ def build_report(cache: dict[str, Any]) -> str:
         "",
         "## Registration Status",
         "",
-        "These fingerprints have not yet been inserted into raw.source_file.",
+        "This report records raw-file fingerprints only. PostgreSQL registration "
+        "status is documented separately in docs/source_file_registration.md.",
         "",
     ])
     return "\n".join(lines)
