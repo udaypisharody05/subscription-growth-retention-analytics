@@ -1,6 +1,6 @@
 # PostgreSQL Analytical Data Model
 
-This is a proposed analytical design based only on the verified inspection findings. It does not create SQL, database objects, connections, or ingestion jobs. Proposed grains and processing rules are design choices, not additional claims about the source data.
+This document combines the proposed analytical design with implementation notes for completed database milestones. Migration 002 implements only the core staging structures described below; the analytical dimensions, facts, data loads, and ingestion jobs remain future work. Proposed grains and processing rules are design choices, not additional claims about the source data.
 
 ## 1. Design Principles
 
@@ -30,6 +30,18 @@ The manifest should conceptually record a source-file key, filename, file-versio
 Typed/clean staging means that proposed types and validation rules are applied deliberately, with exceptions made visible. It does not authorize silent deletion, arbitrary correction, or undocumented deduplication. Specific cleaning policies remain open until validated.
 
 For activity, the intended path is immutable CSVs, bounded streaming partial aggregation, and a consolidated daily analytical fact. Partial staging data is temporary working data and should be released after successful consolidation and validation. A persistent PostgreSQL raw log table plus a full staging log table plus a full analytical log copy is not the proposed design.
+
+### Implemented core staging schema
+
+Migration 002 creates three currently empty typed staging tables. Data loading is a later milestone.
+
+| Implemented table | Physical grain and treatment |
+| --- | --- |
+| `staging.members` | One `members_v3.csv` source row, retained as typed member enrichment with file and 1-based data-row lineage. Raw `bd` values remain in `bd_raw`; analytical age cleaning occurs later. |
+| `staging.churn_labels` | One time-dependent labeled-user source observation for an expiry cohort, with lineage. The cohort uses a first-of-month anchor; no exact churn date is invented. |
+| `staging.transactions` | One preserved transaction source row with lineage and no customer/date deduplication. Deterministic stored generated columns describe price, transaction-to-expiry, and plan-to-expiry relationships. |
+
+The transaction long-expiry flag uses `expiry_delta_days > 730`. This is a project analytical convention, not an official KKBox invalidity rule. The generated relationship fields preserve and expose unusual values rather than rejecting them. No full raw user-log staging table exists by design; activity will be processed later through bounded aggregation.
 
 ## 3. Customer Identity Strategy
 
