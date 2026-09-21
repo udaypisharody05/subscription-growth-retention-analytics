@@ -36,5 +36,5 @@
 - `raw.source_file`: 7 registered source files.
 - `staging.members`: 6,769,473 rows loaded.
 - `staging.churn_labels`: 1,963,891 rows loaded.
-- `staging.transactions`: 0 rows; transaction ingestion remains future work.
-- User-activity processing and analytics marts also remain future work.
+- `staging.transactions`: 22,978,755 rows loaded.
+- User-activity processing and analytics marts remain future work.
