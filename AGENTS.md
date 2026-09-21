@@ -37,4 +37,5 @@
 - `staging.members`: 6,769,473 rows loaded.
 - `staging.churn_labels`: 1,963,891 rows loaded.
 - `staging.transactions`: 22,978,755 rows loaded.
-- User-activity processing and analytics marts remain future work.
+- The core V1 user, churn, and transaction analytics layer is implemented.
+- User-activity processing and its daily/monthly facts remain future work.

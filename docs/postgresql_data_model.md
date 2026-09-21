@@ -1,6 +1,6 @@
 # PostgreSQL Analytical Data Model
 
-This document combines the proposed analytical design with implementation notes for completed database milestones. Migration 002 implements only the core staging structures described below; the analytical dimensions, facts, data loads, and ingestion jobs remain future work. Proposed grains and processing rules are design choices, not additional claims about the source data.
+This document combines the analytical design with implementation notes for completed database milestones. Migration 002 implements the core staging structures, and migration 003 implements the V1 user, churn, and transaction analytics layer described below. User-activity facts and unresolved business measures remain future work. Proposed grains and processing rules are design choices, not additional claims about the source data.
 
 ## 1. Design Principles
 
@@ -33,7 +33,7 @@ For activity, the intended path is immutable CSVs, bounded streaming partial agg
 
 ### Implemented core staging schema
 
-Migration 002 creates three typed staging tables. The member/churn loading milestone populates `staging.members` and `staging.churn_labels`; `staging.transactions` remains empty pending its separate load milestone.
+Migration 002 creates three typed staging tables. The completed ingestion milestones populate all three while retaining their exact registered source lineage.
 
 | Implemented table | Physical grain and treatment |
 | --- | --- |
@@ -42,6 +42,12 @@ Migration 002 creates three typed staging tables. The member/churn loading miles
 | `staging.transactions` | One preserved transaction source row with lineage and no customer/date deduplication. Deterministic stored generated columns describe price, transaction-to-expiry, and plan-to-expiry relationships. |
 
 The transaction long-expiry flag uses `expiry_delta_days > 730`. This is a project analytical convention, not an official KKBox invalidity rule. The generated relationship fields preserve and expose unusual values rather than rejecting them. No full raw user-log staging table exists by design; activity will be processed later through bounded aggregation.
+
+### Implemented core analytics layer
+
+Migration 003 materializes `analytics.dim_user` and `analytics.fact_churn_observation`. It exposes the complete staged transaction grain through `analytics.fact_transaction`, a view over `staging.transactions`, so the 22,978,755 transaction rows are not physically duplicated. Four reusable views provide monthly transaction activity, churn-cohort summaries, member-metadata coverage, and transaction relationship/anomaly summaries.
+
+The implemented V1 canonical user universe is the union of distinct identities currently present in staged members, churn labels, and transactions. It contains 7,207,283 users, including 437,810 without member metadata. User-log identities will be incorporated only when the bounded activity aggregation milestone is implemented; raw user logs were not loaded for migration 003.
 
 ## 3. Customer Identity Strategy
 
@@ -77,17 +83,16 @@ The identity record must exist even when all optional member attributes are unav
 
 Do not include `is_churn` or a current churn status inferred from the training files. Those labels refer to expiry-cohort observations and can change for the same customer. The available member attributes also do not establish a historical demographic change timeline; none is invented here.
 
-The efficient construction of the canonical identity universe remains an implementation question. The design requires one identity per `msno`, not simultaneous in-memory sets for every source.
+Migration 003 constructs the universe in PostgreSQL by loading member identities first, then inserting only distinct missing churn and transaction identities. It does not build simultaneous in-memory identity sets in Python. Activity identities remain deferred to the bounded user-log aggregation milestone.
 
 ## 4. Transaction Model
 
-Proposed table: `analytics.fact_transaction`.
+Implemented view: `analytics.fact_transaction`.
 
 Grain: one preserved KKBox transaction source record, not one customer/day and not an assumed unique business payment.
 
-Conceptual fields:
+Exposed fields include:
 
-- `transaction_key`: surrogate key for the preserved source record.
 - `user_key`: canonical customer identity.
 - `transaction_date`.
 - `membership_expire_date`.
@@ -111,19 +116,17 @@ Verified exact full-row overlap between the files is zero. V2 is not a simple du
 
 ## 5. Churn Observation Model
 
-Proposed table: `analytics.fact_churn_observation`.
+Implemented table: `analytics.fact_churn_observation`.
 
 Grain: one customer + expiry cohort observation.
 
-Conceptual fields:
+Implemented fields:
 
-- `churn_observation_key`.
 - `user_key`.
 - `expiry_cohort_month`.
 - `is_churn`.
 - `label_source`.
-
-Source lineage can additionally retain the source-file key and source record ordinal in staging.
+- `source_file_key` and `source_row_number` lineage.
 
 | Label source | `expiry_cohort_month` | Interpretation |
 | --- | --- | --- |
@@ -217,16 +220,16 @@ Canonical identities are resolved before analytical facts reference `user_key`. 
 
 Use LEFT JOIN semantics for optional member enrichment. Keep date roles explicit in Power BI so expiry and transaction dates are not confused. Avoid direct fact-to-fact joins at incompatible grains that multiply transaction, activity, or cohort rows; compare appropriately aggregated measures through shared dimensions.
 
-## 9. Proposed Analytical Tables
+## 9. Analytical Tables and Views
 
-| Table | Grain | Purpose |
+| Object | Grain | Implementation status and purpose |
 | --- | --- | --- |
-| `analytics.dim_user` | One distinct canonical `msno` | Shared customer identity with optional member enrichment |
-| `analytics.dim_date` | One calendar date | Consistent date and month-anchor analysis |
-| `analytics.fact_transaction` | One preserved transaction source record | Source-aware transaction and validated revenue analysis |
-| `analytics.fact_churn_observation` | One user + expiry cohort month | Time-dependent churn outcomes |
-| `analytics.fact_user_activity_daily` | One user + activity date after explicit aggregation | Daily engagement analysis |
-| `analytics.fact_user_activity_monthly` | One user + activity month | Smaller Power BI-oriented engagement aggregates |
+| `analytics.dim_user` | One distinct canonical `msno` | Implemented; shared customer identity with optional member enrichment |
+| `analytics.dim_date` | One calendar date | Future; consistent date and month-anchor analysis |
+| `analytics.fact_transaction` | One preserved transaction source record | Implemented as a source-aware view over staging; no revenue definition |
+| `analytics.fact_churn_observation` | One user + expiry cohort month | Implemented; time-dependent churn outcomes |
+| `analytics.fact_user_activity_daily` | One user + activity date after explicit aggregation | Future; daily engagement analysis |
+| `analytics.fact_user_activity_monthly` | One user + activity month | Future; smaller Power BI-oriented engagement aggregates |
 
 Minimal supporting tables:
 
@@ -251,15 +254,13 @@ There is no requirement for permanent PostgreSQL raw or staging copies of every 
 7. An exact churn event date is unavailable.
 8. Raw user/date uniqueness is not assumed; analytical daily uniqueness is created by an explicit aggregation process.
 
-## 11. Open Questions Before SQL Implementation
+## 11. Open Questions for Future Work
 
-- What validation and interpretation rules are appropriate for member demographics, especially `bd`, and other nullable member attributes?
 - How should suspicious membership expiry dates such as 1970-01-01 and 2036-10-15 be represented in analytical dates and quality indicators without losing source evidence?
 - Do transaction monetary fields require additional validation, and what verified rules are needed before defining revenue measures from preserved transaction source records?
 - Do activity user/date repeats exist, how common are they, and do they represent additive contributions, repeated copies, or overlapping summaries?
 - What are the precise count-category and `num_unq` semantics, and which daily aggregation rules are justified if multiple records contribute to one user/date?
 - What definition should distinguish an observed activity day from an active listening day, and can a defensible `total_plays` measure be derived from the supplied count categories?
-- What is the most efficient bounded-memory or database-assisted method for generating and maintaining the canonical customer universe across all relevant sources?
 - What daily aggregate cardinality, partition size, temporary disk budget, and Power BI detail requirements should guide the physical activity design?
 
 These questions are not resolved by this document. SQL and ETL implementation should follow the corresponding validation and design decisions.
